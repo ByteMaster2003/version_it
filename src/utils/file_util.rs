@@ -40,6 +40,9 @@ pub fn expand_paths(paths: &[String]) -> Vec<String> {
     for path in paths {
         let path_obj = Path::new(path);
 
+        if !path_obj.exists() {
+            all_files.push(path.clone());
+        }
         if path_obj.is_dir() {
             all_files.extend(list_files_recursively(path_obj));
         } else if path_obj.is_file() {

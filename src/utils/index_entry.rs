@@ -7,6 +7,15 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FileStatus {
+    New = 0,
+    Modified = 1,
+    Unchanged = 2,
+    Deleted = 3,
+}
+
 #[derive(Debug)]
 pub struct IndexEntry {
     pub ctime_secs: u32,
@@ -16,6 +25,7 @@ pub struct IndexEntry {
     pub mode: u32,
     pub file_size: u32,
     pub sha256: [u8; 32],
+    pub status: FileStatus,
     pub flags: u16,   // includes length of path
     pub path: String, // variable length
 }
@@ -62,6 +72,7 @@ impl IndexEntry {
             mode: 0o100644, // regular non-executable file
             file_size: metadata.len() as u32,
             sha256,
+            status: FileStatus::New,
             flags,
             path,
         };
@@ -75,6 +86,7 @@ impl IndexEntry {
         file.write_u32::<BigEndian>(self.mode)?;
         file.write_u32::<BigEndian>(self.file_size)?;
         file.write_all(&self.sha256)?;
+        file.write_all(&[self.status as u8])?;
         file.write_u16::<BigEndian>(self.flags)?;
 
         // Variable field (path)
@@ -102,6 +114,15 @@ impl IndexEntry {
 
         let mut sha256 = [0u8; 32];
         reader.read_exact(&mut sha256)?;
+        let mut status_buf = [0u8; 1];
+        reader.read_exact(&mut status_buf)?;
+        let status = match status_buf[0] {
+            0 => FileStatus::New,
+            1 => FileStatus::Modified,
+            2 => FileStatus::Unchanged,
+            3 => FileStatus::Deleted,
+            _ => return Ok(None), // Invalid status, corrupted index
+        };
 
         let flags = reader.read_u16::<BigEndian>()?;
         let path_len = (flags & 0x0FFF) as usize;
@@ -118,15 +139,16 @@ impl IndexEntry {
         }
 
         Ok(Some(Self {
-					ctime_secs,
-					ctime_nsecs,
-					mtime_secs,
-					mtime_nsecs,
-					mode,
-					file_size,
-					sha256,
-					flags,
-					path,
-			}))
+            ctime_secs,
+            ctime_nsecs,
+            mtime_secs,
+            mtime_nsecs,
+            mode,
+            file_size,
+            sha256,
+            status,
+            flags,
+            path,
+        }))
     }
 }

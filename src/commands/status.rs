@@ -1,11 +1,11 @@
 use crate::utils;
 use clap::Command;
+use colored::*;
 use std::{
     env,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use colored::*;
 
 pub fn get_status_command() -> Command {
     Command::new("status").about("Check the status of changes")
@@ -24,8 +24,7 @@ pub fn status() {
 
     let mut untracked_files: Vec<String> = Vec::new();
     let mut added_files: Vec<String> = Vec::new();
-    let mut modified_files: Vec<String> = Vec::new();
-    let mut deleted_files: Vec<String> = Vec::new();
+    let mut changed_files: Vec<String> = Vec::new();
 
     for file_path in files_to_add {
         // Step 3a: Get file metadata (timestamp, size, etc.)
@@ -48,10 +47,19 @@ pub fn status() {
                     existing_entry.mtime_secs = mtime.as_secs() as u32;
 
                     if existing_entry.sha256 != file_hash {
-                        modified_files.push(file_path.clone());
+                        changed_files.push(format!("  {} {}", "modified:".red(), file_path.clone().red()));
                     }
                 } else {
-                    added_files.push(file_path.clone());
+                    let status = existing_entry.status;
+                    let status_message = if status == utils::FileStatus::New {
+                        "new file:"
+                    } else if status == utils::FileStatus::Modified {
+                        "modified:"
+                    } else {
+                        "deleted: "
+                    };
+
+                    added_files.push(format!("  {} {}", status_message.green(), file_path.clone().green()));
                 }
             }
             None => {
@@ -62,28 +70,25 @@ pub fn status() {
 
     for entry in index_entries.iter() {
         if !Path::new(entry.path.as_str()).exists() {
-            deleted_files.push(entry.path.clone());
+            if entry.status != utils::FileStatus::Deleted {
+                changed_files.push(format!("  {} {}", "deleted: ".red(), entry.path.clone().red()));
+            } else {
+                added_files.push(format!("  {} {}", "deleted: ".green(), entry.path.clone().green()));
+            }
         }
     }
 
     if !added_files.is_empty() {
         println!("Changes to be committed:");
         for file in added_files {
-            println!("  {} {}", "modified:".green(), file.green())
+            println!("{}", file)
         }
         println!();
     }
-    if !modified_files.is_empty() {
+    if !changed_files.is_empty() {
         println!("Changes not staged for commit:");
-        for file in modified_files {
-            println!("  {} {}", "modified:".red(), file.red())
-        }
-        println!();
-    }
-    if !deleted_files.is_empty() {
-        println!("Deleted files not staged for commit:");
-        for file in deleted_files {
-            println!("  {} {}", "deleted:".red(), file.red())
+        for file in changed_files {
+            println!("{}", file)
         }
         println!();
     }
