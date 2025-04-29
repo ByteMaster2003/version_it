@@ -1,5 +1,5 @@
 use version_it::cli;
-use version_it::commands::{add, clone, init, status};
+use version_it::commands::{add, clone, commit, init, status};
 
 fn main() {
     let matches = cli().get_matches();
@@ -27,6 +27,11 @@ fn main() {
                 .collect();
 
             add(&paths);
+        }
+        Some(("commit", sub_matches)) => {
+            let message = sub_matches.get_one::<String>("message").cloned();
+
+            commit(message);
         }
         _ => unreachable!("Unknown subcommand!"),
     }

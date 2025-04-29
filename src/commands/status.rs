@@ -20,7 +20,7 @@ pub fn status() {
     }
 
     let files_to_add: Vec<String> = utils::expand_paths(&[String::from(".")]);
-    let mut index_entries: Vec<utils::IndexEntry> = utils::read_index().unwrap();
+    let index_entries: Vec<utils::IndexEntry> = utils::read_index().unwrap();
 
     let mut untracked_files: Vec<String> = Vec::new();
     let mut added_files: Vec<String> = Vec::new();
@@ -37,17 +37,19 @@ pub fn status() {
             .unwrap();
 
         match index_entries
-            .iter_mut()
+            .iter()
             .find(|entry| entry.path == file_path)
         {
             Some(existing_entry) => {
                 if existing_entry.mtime_secs != mtime.as_secs() as u32 {
                     let (file_hash, _object) = utils::hash_file(&file_path);
-                    existing_entry.mtime_nsecs = mtime.as_nanos() as u32;
-                    existing_entry.mtime_secs = mtime.as_secs() as u32;
 
                     if existing_entry.sha256 != file_hash {
-                        changed_files.push(format!("  {} {}", "modified:".red(), file_path.clone().red()));
+                        changed_files.push(format!(
+                            "  {} {}",
+                            "modified:".red(),
+                            file_path.clone().red()
+                        ));
                     }
                 } else {
                     let status = existing_entry.status;
@@ -55,11 +57,19 @@ pub fn status() {
                         "new file:"
                     } else if status == utils::FileStatus::Modified {
                         "modified:"
-                    } else {
+                    } else if status == utils::FileStatus::Deleted {
                         "deleted: "
+                    } else {
+                        "Unchanged"
                     };
 
-                    added_files.push(format!("  {} {}", status_message.green(), file_path.clone().green()));
+                    if status_message != "Unchanged" {
+                        added_files.push(format!(
+                            "  {} {}",
+                            status_message.green(),
+                            file_path.clone().green()
+                        ));
+                    }
                 }
             }
             None => {
@@ -71,11 +81,23 @@ pub fn status() {
     for entry in index_entries.iter() {
         if !Path::new(entry.path.as_str()).exists() {
             if entry.status != utils::FileStatus::Deleted {
-                changed_files.push(format!("  {} {}", "deleted: ".red(), entry.path.clone().red()));
+                changed_files.push(format!(
+                    "  {} {}",
+                    "deleted: ".red(),
+                    entry.path.clone().red()
+                ));
             } else {
-                added_files.push(format!("  {} {}", "deleted: ".green(), entry.path.clone().green()));
+                added_files.push(format!(
+                    "  {} {}",
+                    "deleted: ".green(),
+                    entry.path.clone().green()
+                ));
             }
         }
+    }
+
+    if added_files.is_empty() && changed_files.is_empty() && untracked_files.is_empty() {
+        println!("Everything is up to date on main branch");
     }
 
     if !added_files.is_empty() {
@@ -99,5 +121,4 @@ pub fn status() {
         }
     }
 
-    utils::write_index(&index_entries, path_to_vit.join("index").to_str().unwrap()).unwrap();
 }
