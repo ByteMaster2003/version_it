@@ -1,4 +1,7 @@
-use crate::commands::{get_add_command, get_clone_command, get_init_command, get_status_command, get_commit_command};
+use crate::commands::{
+    get_add_command, get_branch_command, get_clone_command, get_commit_command, get_init_command,
+    get_status_command,
+};
 use clap::Command;
 
 pub fn cli() -> Command {
@@ -12,4 +15,5 @@ pub fn cli() -> Command {
         .subcommand(get_status_command())
         .subcommand(get_add_command())
         .subcommand(get_commit_command())
+        .subcommand(get_branch_command())
 }
