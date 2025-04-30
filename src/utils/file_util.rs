@@ -1,4 +1,7 @@
 use crate::utils::IndexEntry;
+use flate2::{Compression, write::ZlibEncoder};
+use hex;
+use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 use std::{
     env,
@@ -6,9 +9,6 @@ use std::{
     io::{Result, Write},
     path::{Path, PathBuf},
 };
-use walkdir::WalkDir;
-use flate2::{ Compression, write::ZlibEncoder };
-use hex;
 
 pub fn write_index(entries: &[IndexEntry], path: &str) -> Result<()> {
     let mut file = File::create(path)?;
@@ -56,17 +56,20 @@ pub fn expand_paths(paths: &[String]) -> Vec<String> {
 pub fn list_files_recursively(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
 
-    for entry in WalkDir::new(root).into_iter().filter_map(|s| s.ok()) {
-        let path = entry.path();
+    for result in WalkBuilder::new(root)
+        .standard_filters(true)
+        .add_custom_ignore_filename(".vitignore")
+        .build()
+    {
+        let dir_entry = match result {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
 
-        // Skip .git, .vit and target directories
-        let path_str = path.to_str().unwrap_or("");
-        if path_str.contains("./.git/") || path_str.contains("./.vit/") || path_str.contains("./target/") {
-            continue;
-        }
-
-        if path.is_file() {
-            files.push(path.to_string_lossy().to_string());
+        if dir_entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            if let Some(path_str) = dir_entry.path().to_str() {
+                files.push(path_str.to_string());
+            }
         }
     }
 
