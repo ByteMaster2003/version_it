@@ -1,12 +1,12 @@
 use crate::utils::IndexEntry;
-use flate2::{Compression, write::ZlibEncoder};
+use flate2::{Compression, bufread::ZlibDecoder, write::ZlibEncoder};
 use hex;
 use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 use std::{
-    env,
-    fs::{self, File},
-    io::{Result, Write},
+    env, fs,
+    fs::File,
+    io::{Cursor, Read, Result, Write},
     path::{Path, PathBuf},
 };
 
@@ -66,7 +66,11 @@ pub fn list_files_recursively(root: &Path) -> Vec<String> {
             Err(_) => continue,
         };
 
-        if dir_entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+        if dir_entry
+            .file_type()
+            .map(|ft| ft.is_file())
+            .unwrap_or(false)
+        {
             if let Some(path_str) = dir_entry.path().to_str() {
                 files.push(path_str.to_string());
             }
@@ -117,4 +121,34 @@ pub fn store_object(git_dir: &Path, sha256: [u8; 32], content: Vec<u8>) -> Resul
     fs::write(object_path, compressed)?;
 
     Ok(sha256)
+}
+
+pub fn decompress_file_content(file_path: &Path) -> Result<Vec<u8>> {
+    let compressed_data = std::fs::read(file_path)?;
+
+    let mut decoder = ZlibDecoder::new(Cursor::new(compressed_data));
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed)?;
+    Ok(decompressed)
+}
+
+pub fn clear_current_tree(root: &Path) {
+    for result in WalkBuilder::new(root)
+        .standard_filters(true)
+        .add_custom_ignore_filename(".vitignore")
+        .build()
+    {
+        let dir_entry = match result {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+
+        if dir_entry.file_type().unwrap().is_dir() {
+            if dir_entry.path().to_str() != root.to_str() {
+                fs::remove_dir_all(&dir_entry.path()).unwrap();
+            }
+        } else {
+            fs::remove_file(&dir_entry.path()).unwrap();
+        }
+    }
 }

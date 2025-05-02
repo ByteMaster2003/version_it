@@ -39,9 +39,13 @@ impl IndexEntry {
 
         let metadata = fs::metadata(file_path).expect("Unable to get metadata");
         let content = fs::read(file_path).expect("Unable to read file");
-
         let mut hasher = Sha256::new();
+
+        // Create header
+        let header = format!("blob {}\0", content.len());
+        hasher.update(header.as_bytes());
         hasher.update(&content);
+
         let sha256_result = hasher.finalize();
         let mut sha256 = [0u8; 32];
         sha256.copy_from_slice(&sha256_result[..]);

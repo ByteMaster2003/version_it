@@ -28,7 +28,9 @@ pub fn commit(message: Option<String>) {
 
     let vit_dir = env::current_dir().unwrap().join(".vit");
     let mut index_entries = utils::read_index().unwrap();
-    let commit_ref = vit_dir.join("refs/heads/main");
+    let head_ref = fs::read_to_string(vit_dir.join("HEAD")).unwrap();
+    let current_branch_ref = head_ref.trim_start_matches("ref: ").trim();
+    let commit_ref = vit_dir.join(current_branch_ref);
 
     let prev_commit_hash = if commit_ref.exists() {
         let prev_hash_str = fs::read_to_string(&commit_ref).unwrap();
@@ -37,10 +39,9 @@ pub fn commit(message: Option<String>) {
         vec![0u8; 32]
     };
     let tree_hash = utils::build_tree(&index_entries);
-    let commit_content = utils::build_commit(tree_hash, &prev_commit_hash, &commit_message);
-    let commit_hash = utils::save_commit_object(&commit_content);
+    let commit_hash: [u8; 32] = utils::build_commit(tree_hash, &prev_commit_hash, &commit_message);
 
-    utils::update_head(commit_hash);
+    utils::update_head(commit_hash, &commit_ref);
     let author_name = "Vivek";
     let author_email = "vivek@example.com";
     utils::write_log_entry(
@@ -49,6 +50,7 @@ pub fn commit(message: Option<String>) {
         author_name,
         author_email,
         &commit_message,
+        current_branch_ref
     );
 
     index_entries.retain(|entry| entry.status != utils::FileStatus::Deleted);

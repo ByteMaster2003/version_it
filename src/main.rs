@@ -1,5 +1,5 @@
 use version_it::cli;
-use version_it::commands::{add, branch, clone, commit, init, status};
+use version_it::commands::{add, branch, checkout, clone, commit, init, status};
 
 fn main() {
     let matches = cli().get_matches();
@@ -34,10 +34,15 @@ fn main() {
             commit(message);
         }
         Some(("branch", sub_matches)) => {
-            let message = sub_matches.get_one::<String>("name").cloned();
+            let brnach_name = sub_matches.get_one::<String>("name").cloned();
             let is_deleting = sub_matches.get_flag("delete");
 
-            branch(message, is_deleting);
+            branch(brnach_name, is_deleting);
+        }
+        Some(("checkout", sub_matches)) => {
+            let branch_name = sub_matches.get_one::<String>("name").cloned().unwrap();
+
+            checkout(&branch_name);
         }
         _ => unreachable!("Unknown subcommand!"),
     }

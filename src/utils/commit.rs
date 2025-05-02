@@ -1,14 +1,10 @@
-use crate::utils::IndexEntry;
+use crate::utils::{CommitEntry, IndexEntry, TreeEntry, decompress_file_content};
 use chrono::Local;
-use flate2::{ Compression, write::ZlibEncoder };
+use flate2::{Compression, write::ZlibEncoder};
 use sha2::{Digest, Sha256};
+use core::str;
 use std::{
-    collections::BTreeMap,
-    env, fs,
-    fs::{File, OpenOptions},
-    io::{Error, ErrorKind, Read, Write},
-    path::{Path, PathBuf},
-    process::Command,
+    collections::BTreeMap, env, ffi::OsStr, fs::{self, File, OpenOptions}, io::{Error, ErrorKind, Read, Write}, path::{Path, PathBuf}, process::Command
 };
 
 pub fn build_tree(index_entries: &[IndexEntry]) -> [u8; 32] {
@@ -37,19 +33,19 @@ fn build_tree_recursive(path: &str, tree_map: &BTreeMap<String, Vec<&IndexEntry>
     let mut tree_content = Vec::new();
 
     if let Some(entries) = tree_map.get(path) {
-        for entry in entries {
-            let mode = entry.mode.to_string(); // Regular file for now
-            let filename = std::path::Path::new(&entry.path)
+        for entry in entries.clone() {
+            let filename = Path::new(&entry.path)
                 .file_name()
                 .unwrap()
                 .to_str()
                 .unwrap();
 
-            tree_content.extend_from_slice(mode.as_bytes());
-            tree_content.push(b' ');
-            tree_content.extend_from_slice(filename.as_bytes());
-            tree_content.push(0); // NULL separator
-            tree_content.extend_from_slice(&entry.sha256[..]);
+            let tree_entry = TreeEntry {
+                mode: entry.mode.to_string(),
+                name: filename.to_string(),
+                sha256: entry.sha256,
+            };
+            tree_content.extend_from_slice(&tree_entry.to_bytes());
         }
     }
 
@@ -57,17 +53,15 @@ fn build_tree_recursive(path: &str, tree_map: &BTreeMap<String, Vec<&IndexEntry>
     for (dir_path, _dir_entries) in tree_map.iter() {
         if Path::new(dir_path).parent().map(|p| p.to_str().unwrap()) == Some(path) {
             let sub_tree_hash = build_tree_recursive(dir_path, tree_map);
-
             let mode = "040000"; // Directory
-            let dirname = Path::new(dir_path)
-                .to_str()
-                .unwrap();
+            let dirname = Path::new(dir_path).file_name().unwrap_or(OsStr::new("")).to_str().unwrap();
 
-            tree_content.extend_from_slice(mode.as_bytes());
-            tree_content.push(b' ');
-            tree_content.extend_from_slice(dirname.as_bytes());
-            tree_content.push(0);
-            tree_content.extend_from_slice(&sub_tree_hash[..]);
+            let tree_entry = TreeEntry {
+                mode: mode.to_string(),
+                name: dirname.to_string(),
+                sha256: sub_tree_hash,
+            };
+            tree_content.extend_from_slice(&tree_entry.to_bytes());
         }
     }
 
@@ -83,11 +77,13 @@ fn save_tree_object(content: &[u8]) -> Result<[u8; 32], Error> {
         return Err(Error::new(ErrorKind::NotFound, "Vit directory not found!"));
     }
 
+    let mut full_data: Vec<u8> = Vec::new();
+    let str_data = format!("tree {}\0", content.len());
+    full_data.extend_from_slice(str_data.as_bytes());
+    full_data.extend_from_slice(content);
+
     let mut hasher = Sha256::new();
-    hasher.update(b"tree ");
-    hasher.update(content.len().to_string().as_bytes());
-    hasher.update(b"\0");
-    hasher.update(content);
+    hasher.update(&full_data[..]);
     let tree_hash = hasher.finalize();
 
     let mut tree_id = [0u8; 32];
@@ -97,43 +93,58 @@ fn save_tree_object(content: &[u8]) -> Result<[u8; 32], Error> {
     let object_dir = path_to_vit.join(format!("objects/{:02x}", tree_id[0]));
     let object_file = object_dir.join(hex::encode(&tree_id[1..]));
 
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&full_data).unwrap();
+    let compressed = encoder.finish().unwrap();
+
     fs::create_dir_all(&object_dir).unwrap();
-    fs::write(&object_file, content).unwrap();
+    fs::write(object_file, compressed).unwrap();
 
     Ok(tree_id)
 }
 
-pub fn build_commit(tree_hash: [u8; 32], parent_hash: &[u8], message: &str) -> Vec<u8> {
-    let mut commit_content = Vec::new();
+pub fn parse_tree_entries(path: &Path) -> Result<Vec<TreeEntry>, Error> {
+    let decompressed = decompress_file_content(path).unwrap();
+    let data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+    let mut tree_entries: Vec<TreeEntry> = Vec::new();
+    let mut cursor = 0;
 
-    commit_content.extend_from_slice(b"tree ");
-    commit_content.extend_from_slice(hex::encode(tree_hash).as_bytes());
-    commit_content.push(b'\n');
+    while cursor < data.len() {
+        let mode_end = data[cursor..].iter().position(|&b| b == b' ').unwrap();
+        let mode = str::from_utf8(&data[cursor..cursor + mode_end]).unwrap().to_string();
+        cursor += mode_end + 1;
 
-    commit_content.extend_from_slice(b"parent ");
-    commit_content.extend_from_slice(&parent_hash[..]);
-    commit_content.push(b'\n');
+        let name_end = data[cursor..].iter().position(|&b| b == 0).unwrap();
+        let name = str::from_utf8(&data[cursor..cursor + name_end])
+        .unwrap()
+        .to_string();
+        cursor += name_end + 1;
 
-    let author = "Vivek <vivek@example.com>";
-    let timestamp = chrono::Utc::now().timestamp();
+        let mut sha256 = [0u8; 32];
+        sha256.copy_from_slice(&data[cursor..cursor + 32]);
+        cursor += 32;
 
-    commit_content.extend_from_slice(b"author ");
-    commit_content.extend_from_slice(author.as_bytes());
-    commit_content.extend_from_slice(format!(" {}", timestamp).as_bytes());
-    commit_content.push(b'\n');
+        tree_entries.push(TreeEntry { mode, name, sha256 });
+    }
 
-    commit_content.extend_from_slice(b"committer ");
-    commit_content.extend_from_slice(author.as_bytes());
-    commit_content.extend_from_slice(format!(" {}", timestamp).as_bytes());
-    commit_content.push(b'\n');
-
-    commit_content.push(b'\n'); // Blank line before message
-    commit_content.extend_from_slice(message.as_bytes());
-
-    commit_content
+    Ok(tree_entries)
 }
 
-pub fn save_commit_object(content: &[u8]) -> [u8; 32] {
+pub fn build_commit(tree_hash: [u8; 32], parent_hash: &[u8], message: &str) -> [u8; 32] {
+    let commit_entry = CommitEntry {
+        tree: tree_hash,
+        parent: parent_hash.try_into().unwrap(),
+        author: "Vivek <vivek@example.com>".to_string(),
+        committer: "Vivek <vivek@example.com>".to_string(),
+        timestamp: chrono::Utc::now().timestamp(),
+        timezone: "".to_string(),
+        message: message.to_string(),
+    };
+
+    save_commit_object(&commit_entry.to_bytes())
+}
+
+fn save_commit_object(content: &[u8]) -> [u8; 32] {
     let str_data = format!("commit {}\0", content.len());
     let mut full_data = str_data.into_bytes();
     full_data.extend_from_slice(content);
@@ -158,16 +169,15 @@ pub fn save_commit_object(content: &[u8]) -> [u8; 32] {
     commit_hash
 }
 
-pub fn update_head(commit_hash: [u8; 32]) {
+pub fn update_head(commit_hash: [u8; 32], commit_ref: &Path) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
 
     if !vit_dir.exists() {
-        panic!("Version_it repository not initialized!");
+        panic!("Vit repository not initialized!");
     }
 
-    let ref_dir = vit_dir.join("refs/heads/main");
-    fs::write(ref_dir, hex::encode(commit_hash)).expect("Failed to update reference!");
+    fs::write(commit_ref, hex::encode(commit_hash)).expect("Failed to update reference!");
 }
 
 pub fn write_log_entry(
@@ -176,6 +186,7 @@ pub fn write_log_entry(
     author_name: &str,
     author_email: &str,
     message: &str,
+    current_branch_ref: &str
 ) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
@@ -202,10 +213,11 @@ pub fn write_log_entry(
         message,
     );
 
+    let log_path = vit_dir.join("logs").join(current_branch_ref);
     std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(vit_dir.join("logs/refs/heads/main"))
+        .open(vit_dir.join(log_path))
         .unwrap()
         .write_all(log_entry.as_bytes())
         .unwrap();

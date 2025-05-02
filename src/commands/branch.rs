@@ -4,7 +4,7 @@ use std::{env, fs, path::Path};
 
 pub fn get_branch_command() -> Command {
     Command::new("branch")
-        .about("Record changes to the repository")
+        .about("Get, create or delete a branch")
         .arg(
             Arg::new("name")
                 .required(false)
