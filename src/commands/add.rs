@@ -60,6 +60,7 @@ pub fn add(paths: &[String]) {
                     if existing_entry.sha256 != file_hash {
                         // Mark file as modified
                         existing_entry.status = utils::FileStatus::Modified;
+                        existing_entry.sha256 = file_hash;
 
                         // Store file object
                         let _ = utils::store_object(path_to_vit.as_path(), file_hash, object);

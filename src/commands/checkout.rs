@@ -1,4 +1,6 @@
-use crate::utils::{clear_current_tree, decompress_file_content, parse_tree_entries, read_commit_file};
+use crate::utils::{
+    clear_current_tree, decompress_file_content, parse_tree_entries, read_commit_file,
+};
 use clap::{Arg, Command};
 use colored::Colorize;
 use std::{env, fs, path::Path};
@@ -54,7 +56,6 @@ pub fn checkout(name: &str) {
         .join("objects")
         .join(&tree_hash[..2])
         .join(&tree_hash[2..]);
-
 
     let base_path = env::current_dir().unwrap();
     clear_current_tree(&base_path);
