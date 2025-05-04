@@ -1,6 +1,6 @@
 use crate::utils::{
-    FileStatus, IndexEntry, clear_current_tree, decompress_file_content, parse_tree_entries,
-    read_commit_file, read_index, write_index,
+    self, Action, FileChange, FileStatus, FileType, IndexEntry, calculate_diff,
+    decompress_file_content, parse_tree_entries, read_commit_file, read_index, write_index,
 };
 use clap::{Arg, Command};
 use colored::Colorize;
@@ -28,7 +28,6 @@ pub fn checkout(name: &str) {
     let head_ref = fs::read_to_string(&head_path).unwrap();
     let current_branch_ref = head_ref.trim_start_matches("ref: ").trim();
     let mut index_entries: Vec<IndexEntry> = read_index().unwrap();
-    let mut files_to_keep: Vec<String> = Vec::new();
 
     if Path::new(vit_dir.join(current_branch_ref).as_path())
         .file_name()
@@ -39,6 +38,15 @@ pub fn checkout(name: &str) {
     {
         return println!("{}", "Branch is already Active!".red());
     }
+
+    let current_commit_hash = fs::read_to_string(vit_dir.join(current_branch_ref)).unwrap();
+    // Read commit object and get tree hash
+    let current_commit_path = vit_dir
+        .join("objects")
+        .join(&current_commit_hash[..2])
+        .join(&current_commit_hash[2..]);
+    let current_commit_entry = read_commit_file(&current_commit_path).unwrap();
+    let current_tree_hash = hex::encode(current_commit_entry.tree);
 
     // Get commit hash from current branch
     let commit_hash: String = if heads_dir.join(name).exists() {
@@ -56,27 +64,41 @@ pub fn checkout(name: &str) {
     let commit_entry = read_commit_file(&commit_path).unwrap();
 
     let tree_hash = hex::encode(commit_entry.tree);
-    let tree_path = vit_dir
-        .join("objects")
-        .join(&tree_hash[..2])
-        .join(&tree_hash[2..]);
-
     let base_path = env::current_dir().unwrap();
-    clear_current_tree(&base_path);
-    restore_tree(
-        &tree_path,
+    let mut list_of_changes: Vec<FileChange> = Vec::new();
+
+    calculate_diff(
+        &current_tree_hash,
+        &tree_hash,
         &base_path,
-        &vit_dir.join("objects"),
-        &mut index_entries,
-        &mut files_to_keep,
-    );
+        &mut list_of_changes,
+    )
+    .unwrap();
 
-    files_to_keep = files_to_keep
-        .iter()
-        .map(|file| file.replace(current_dir.to_str().unwrap(), "."))
-        .collect();
+    for change in &list_of_changes {
+        match &change.action {
+            Action::Delete => {
+                delete_files(&change, &current_dir, &mut index_entries);
+            }
+            Action::Restore => {
+                restore_file(
+                    &change,
+                    &current_dir,
+                    &vit_dir.join("objects"),
+                    &mut index_entries,
+                );
+            }
+            Action::Create => {
+                create_files(
+                    &change,
+                    &current_dir,
+                    &vit_dir.join("objects"),
+                    &mut index_entries,
+                );
+            }
+        }
+    }
 
-    index_entries.retain(|entry| files_to_keep.contains(&entry.path));
     write_index(&index_entries, vit_dir.join("index").to_str().unwrap()).unwrap();
     println!("Checkout to branch --> {}", &name);
 }
@@ -86,7 +108,6 @@ fn restore_tree(
     base_path: &Path,
     objects_path: &Path,
     index_entries: &mut Vec<IndexEntry>,
-    files_to_keep: &mut Vec<String>,
 ) {
     let tree_entries = parse_tree_entries(&tree_path).unwrap();
 
@@ -96,7 +117,9 @@ fn restore_tree(
         let file_path = name
             .to_string_lossy()
             .to_string()
-            .replace(env::current_dir().unwrap().to_str().unwrap(), ".");
+            .replace(env::current_dir().unwrap().to_str().unwrap(), ".")
+            .trim_start_matches("./")
+            .to_string();
         let hash = &entry.sha256;
         let hash_str = hex::encode(hash);
 
@@ -106,17 +129,14 @@ fn restore_tree(
             let sub_tree_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
             let sub_base_path = base_path.join(&name);
 
-            restore_tree(
-                &sub_tree_path,
-                &sub_base_path,
-                objects_path,
-                index_entries,
-                files_to_keep,
-            );
+            restore_tree(&sub_tree_path, &sub_base_path, objects_path, index_entries);
         } else {
             let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
             let decompressed = decompress_file_content(&blob_path).unwrap();
             let blob_data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+
+            // Make sure all parent directories are present
+            fs::create_dir_all(name.parent().unwrap()).unwrap();
 
             // Write file data
             fs::write(&name, blob_data).unwrap();
@@ -130,9 +150,94 @@ fn restore_tree(
                 new_entry.status = FileStatus::Unchanged;
                 index_entries.push(new_entry);
             }
+        }
+    }
+}
 
-            // Push into index list
-            files_to_keep.push(file_path);
+fn restore_file(
+    change: &FileChange,
+    current_dir: &Path,
+    objects_path: &Path,
+    index_entries: &mut Vec<IndexEntry>,
+) {
+    let file_path = current_dir.join(&change.path);
+    let hash_str = hex::encode(&change.sha256);
+
+    let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+    let decompressed = decompress_file_content(&blob_path).unwrap();
+    let blob_data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+
+    // Write file data
+    fs::write(&file_path, blob_data).unwrap();
+
+    // Update the index entry
+    if let Some(i_entry) = index_entries.iter_mut().find(|i| i.path == change.path) {
+        i_entry.sha256 = change.sha256;
+        i_entry.status = FileStatus::Unchanged;
+    }
+}
+
+fn delete_files(change: &FileChange, current_dir: &Path, index_entries: &mut Vec<IndexEntry>) {
+    match &change.file_type {
+        FileType::Blob => {
+            let file_path = current_dir.join(&change.path);
+            if file_path.exists() {
+                fs::remove_file(&file_path).unwrap();
+                if let Some(pos) = index_entries
+                    .iter()
+                    .position(|entry| entry.path == change.path)
+                {
+                    index_entries.remove(pos);
+                }
+            }
+        }
+        FileType::Tree => {
+            let dir_name = &change.path;
+            let list_of_files = utils::expand_paths(&[change.path.clone()]);
+
+            for file in list_of_files {
+                let file_path = current_dir.join(&file);
+                if file_path.exists() {
+                    fs::remove_file(&file_path).unwrap();
+                    if let Some(pos) = index_entries.iter().position(|entry| entry.path == file) {
+                        index_entries.remove(pos);
+                    }
+                }
+            }
+            fs::remove_dir_all(dir_name).unwrap();
+        }
+    }
+}
+
+fn create_files(
+    change: &FileChange,
+    current_dir: &Path,
+    objects_path: &Path,
+    index_entries: &mut Vec<IndexEntry>,
+) {
+    match &change.file_type {
+        FileType::Blob => {
+            let file_path = current_dir.join(&change.path);
+            let hash_str = hex::encode(&change.sha256);
+
+            let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+            let decompressed = decompress_file_content(&blob_path).unwrap();
+            let blob_data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+
+            // Write file data
+            fs::write(&file_path, blob_data).unwrap();
+
+            // Update the index entry
+            let mut new_entry = IndexEntry::create(&change.path);
+            new_entry.status = FileStatus::Unchanged;
+            index_entries.push(new_entry);
+        }
+        FileType::Tree => {
+            let hash_str = hex::encode(&change.sha256);
+            let tree_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+            let bash_path = current_dir.join(&change.path);
+
+            restore_tree(&tree_path, &bash_path, objects_path, index_entries);
         }
     }
 }

@@ -10,6 +10,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::parse_tree_entries;
+
 pub fn write_index(entries: &[IndexEntry], path: &str) -> Result<()> {
     let mut file = File::create(path)?;
 
@@ -72,7 +74,7 @@ pub fn list_files_recursively(root: &Path) -> Vec<String> {
             .unwrap_or(false)
         {
             if let Some(path_str) = dir_entry.path().to_str() {
-                files.push(path_str.to_string());
+                files.push(path_str.trim_start_matches("./").to_string());
             }
         }
     }
@@ -151,4 +153,132 @@ pub fn clear_current_tree(root: &Path) {
             fs::remove_file(&dir_entry.path()).unwrap();
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Action {
+    Create = 0,
+    Restore = 1,
+    Delete = 2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FileType {
+    Blob = 0,
+    Tree = 1,
+}
+
+#[derive(Debug)]
+pub struct FileChange {
+    pub path: String,
+    pub file_type: FileType,
+    pub action: Action,
+    pub sha256: [u8; 32]
+}
+
+pub fn calculate_diff(
+    current_hash: &str,
+    target_hash: &str,
+    base_path: &Path,
+    list_of_changes: &mut Vec<FileChange>,
+) -> Result<()> {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    let objects_dir = vit_dir.join("objects");
+
+    // Calculate object path
+    let current_hash_path = objects_dir
+        .join(&current_hash[..2])
+        .join(&current_hash[2..]);
+    let target_hash_path = objects_dir.join(&target_hash[..2]).join(&target_hash[2..]);
+
+    // Parse Tree Entries
+    let current_tree = parse_tree_entries(&current_hash_path).unwrap();
+    let target_tree = parse_tree_entries(&target_hash_path).unwrap();
+
+    for tt_entry in &target_tree {
+        let name = base_path.join(&tt_entry.name);
+        let relative_name = name
+            .to_string_lossy()
+            .replace(&current_dir.to_string_lossy().to_string(), ".")
+            .trim_start_matches("./")
+            .to_string();
+
+        if relative_name == "" {
+            continue;
+        }
+        let hash_str = hex::encode(&tt_entry.sha256);
+        let file_type = if &tt_entry.mode == "040000" {
+            FileType::Tree
+        } else {
+            FileType::Blob
+        };
+        let ct_entry = current_tree
+            .iter()
+            .find(|entry| entry.name == tt_entry.name);
+        match ct_entry {
+            Some(entry) => {
+                if entry.sha256 != tt_entry.sha256 {
+                    if file_type == FileType::Blob {
+                        list_of_changes.push(FileChange {
+                            path: relative_name,
+                            file_type,
+                            action: Action::Restore,
+                            sha256: tt_entry.sha256
+                        });
+                    } else {
+                        calculate_diff(
+                            &hex::encode(entry.sha256),
+                            &hash_str,
+                            &name,
+                            list_of_changes,
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            None => {
+                list_of_changes.push(FileChange {
+                    path: relative_name,
+                    file_type,
+                    action: Action::Create,
+                    sha256: tt_entry.sha256
+                });
+            }
+        };
+    }
+
+    for ct_entry in &current_tree {
+        let name = base_path.join(&ct_entry.name);
+        let relative_name = name
+            .to_string_lossy()
+            .replace(&current_dir.to_string_lossy().to_string(), ".")
+            .trim_start_matches("./")
+            .to_string();
+
+        if relative_name == "" {
+            continue;
+        }
+        let file_type = if &ct_entry.mode == "040000" {
+            FileType::Tree
+        } else {
+            FileType::Blob
+        };
+
+        if let None = &target_tree
+            .iter()
+            .find(|entry| entry.name == ct_entry.name)
+        {
+            list_of_changes.push(FileChange {
+                path: relative_name,
+                file_type,
+                action: Action::Delete,
+                sha256: ct_entry.sha256
+            });
+        }
+    }
+
+    Ok(())
 }
