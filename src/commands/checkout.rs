@@ -103,7 +103,7 @@ pub fn checkout(name: &str) {
     println!("Checkout to branch --> {}", &name);
 }
 
-fn restore_tree(
+pub fn restore_tree(
     tree_path: &Path,
     base_path: &Path,
     objects_path: &Path,
@@ -154,7 +154,7 @@ fn restore_tree(
     }
 }
 
-fn restore_file(
+pub fn restore_file(
     change: &FileChange,
     current_dir: &Path,
     objects_path: &Path,

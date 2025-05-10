@@ -24,7 +24,7 @@ pub fn add(paths: &[String]) {
     let mut is_something_updated: bool = false;
 
     if !path_to_vit.exists() {
-        return println!("Version_it repository not initialized!");
+        return println!("Vit repository not initialized!");
     }
 
     let files_to_add: Vec<String> = utils::expand_paths(paths);
@@ -85,16 +85,17 @@ pub fn add(paths: &[String]) {
         }
     }
 
-    if !is_something_updated {
-        println!("Everything is up to date");
-    }
-
     if add_deleted_files {
         for entry in index_entries.iter_mut() {
             if !Path::new(entry.path.as_str()).exists() {
                 entry.status = utils::FileStatus::Deleted;
+                is_something_updated = true;
             }
         }
+    }
+
+    if !is_something_updated {
+        println!("Everything is up to date");
     }
 
     utils::write_index(&index_entries, path_to_vit.join("index").to_str().unwrap()).unwrap();

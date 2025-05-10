@@ -1,23 +1,23 @@
 use version_it::cli;
-use version_it::commands::{add, branch, checkout, clone, commit, init, status};
+use version_it::commands;
 
 fn main() {
     let matches = cli().get_matches();
 
     match matches.subcommand() {
-        Some(("init", _sub_matches)) => {
-            match init() {
+        Some(("init", _)) => {
+            match commands::init() {
                 Err(err) => {
                     println!("{}", err.to_string())
                 }
                 Ok(()) => {}
             };
         }
-        Some(("status", _sub_matches)) => {
-            status();
+        Some(("status", _)) => {
+            commands::status();
         }
-        Some(("clone", _sub_matches)) => {
-            clone();
+        Some(("clone", _)) => {
+            commands::clone();
         }
         Some(("add", sub_matches)) => {
             let paths: Vec<String> = sub_matches
@@ -26,24 +26,48 @@ fn main() {
                 .cloned()
                 .collect();
 
-            add(&paths);
+            commands::add(&paths);
         }
         Some(("commit", sub_matches)) => {
             let message = sub_matches.get_one::<String>("message").cloned();
 
-            commit(message);
+            commands::commit(message);
         }
         Some(("branch", sub_matches)) => {
             let brnach_name = sub_matches.get_one::<String>("name").cloned();
             let is_deleting = sub_matches.get_flag("delete");
 
-            branch(brnach_name, is_deleting);
+            commands::branch(brnach_name, is_deleting);
         }
         Some(("checkout", sub_matches)) => {
             let branch_name = sub_matches.get_one::<String>("name").cloned().unwrap();
 
-            checkout(&branch_name);
+            commands::checkout(&branch_name);
         }
+        Some(("stash", sub_matches)) => match sub_matches.subcommand() {
+            Some(("save", save_matches)) => {
+                let message = save_matches.get_one::<String>("message").cloned();
+
+                commands::stash(message);
+            }
+            Some(("pop", _)) => {
+                commands::pop();
+            }
+            Some(("apply", apply_matches)) => {
+                let index = apply_matches.get_one::<u8>("message").cloned().unwrap();
+
+                commands::apply(index);
+            }
+            Some(("list", _)) => {
+                commands::list();
+            }
+            Some(("clear", _)) => {
+                commands::clear();
+            }
+            _ => {
+                commands::stash(Option::None);
+            }
+        },
         _ => unreachable!("Unknown subcommand!"),
     }
 }
