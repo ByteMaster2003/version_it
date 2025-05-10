@@ -54,9 +54,15 @@ fn main() {
                 commands::pop();
             }
             Some(("apply", apply_matches)) => {
-                let index = apply_matches.get_one::<u8>("message").cloned().unwrap();
-
-                commands::apply(index);
+                let input = apply_matches.get_one::<String>("index").cloned().unwrap();
+                match input
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("Invalid index: '{}'", input))
+                {
+                    Ok(index) => commands::apply(index),
+                    Err(e) => eprint!("{}", e),
+                }
             }
             Some(("list", _)) => {
                 commands::list();

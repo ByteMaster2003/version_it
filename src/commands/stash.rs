@@ -1,5 +1,7 @@
 use std::{
-    env, fs,
+    env,
+    fs::{self, OpenOptions},
+    io::Read,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -7,8 +9,8 @@ use std::{
 use crate::{
     commands::restore_file,
     utils::{
-        self, FileChange, FileStatus, TreeEntry, build_commit, read_commit_file, save_tree_object,
-        write_log_entry,
+        self, FileChange, FileStatus, TreeEntry, build_commit, decompress_file_content,
+        parse_tree_entries, read_commit_file, save_tree_object, write_log_entry,
     },
 };
 use clap::{Arg, Command};
@@ -86,12 +88,20 @@ pub fn stash(message: Option<String>) {
                     let (file_hash, _object) = utils::hash_file(&file_path);
                     if existing_entry.sha256 != file_hash {
                         if !list_of_files.contains(&file_path) {
+                            list_of_files.push(file_path.clone());
+
                             let tree_entry = TreeEntry {
                                 mode: existing_entry.mode.to_string(),
-                                name: file_path,
+                                name: file_path.clone(),
                                 sha256: file_hash,
                             };
                             stash_content.extend_from_slice(&tree_entry.to_bytes());
+
+                            // Hash the file
+                            let (file_hash, file_content) = utils::hash_file(&file_path);
+
+                            // Store file object
+                            utils::store_object(&vit_dir, file_hash, file_content).unwrap();
                         }
                     }
                 }
@@ -112,7 +122,12 @@ pub fn stash(message: Option<String>) {
         }
     }
 
-    if list_of_files.is_empty() && deleted_files.is_empty() {
+    // Restore all deleted files
+    for change in deleted_files {
+        restore_file(&change, &current_dir, &objects_path, &mut index_entries);
+    }
+
+    if list_of_files.is_empty() {
         println!("No Updates to stash!");
         return;
     };
@@ -170,16 +185,129 @@ pub fn stash(message: Option<String>) {
         &objects_path,
         &mut index_entries,
     );
+}
 
-    // Restore all deleted files
-    for change in deleted_files {
-        restore_file(&change, &current_dir, &objects_path, &mut index_entries);
+pub fn apply(index: usize) {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    let objects_path = vit_dir.join("objects");
+    let stash_path = vit_dir.join("logs/refs/stash");
+
+    if !stash_path.exists() {
+        return;
+    }
+
+    let logs_data = fs::read_to_string(&stash_path).unwrap();
+    let lines: Vec<&str> = logs_data.lines().rev().collect();
+
+    if index >= lines.len() {
+        println!("Invalid stash index!");
+        return;
+    }
+
+
+    let stash_log = lines[index];
+    let parts: Vec<&str> = stash_log.splitn(8, ' ').collect();
+    let current_commit_hash = parts[1].to_string();
+    let current_commit_path = objects_path
+        .join(&current_commit_hash[..2])
+        .join(&current_commit_hash[2..]);
+
+    let stash_entry = read_commit_file(&current_commit_path).unwrap();
+    let stash_tree_hash = hex::encode(&stash_entry.tree);
+    let current_tree_hash = objects_path
+        .join(&stash_tree_hash[..2])
+        .join(&stash_tree_hash[2..]);
+
+    // Restore stashed files
+    let tree_entries = parse_tree_entries(&current_tree_hash).unwrap();
+    for entry in tree_entries {
+        let name = current_dir.join(&entry.name);
+        let hash_str = hex::encode(&entry.sha256);
+
+        let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+        let decompressed = decompress_file_content(&blob_path).unwrap();
+        let blob_data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+
+        // Make sure all parent directories are present
+        fs::create_dir_all(name.parent().unwrap()).unwrap();
+
+        // Write file data
+        fs::write(&name, blob_data).unwrap();
     }
 }
 
-pub fn apply(_index: u8) {}
+pub fn pop() {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    let objects_path = vit_dir.join("objects");
+    let stash_ref = vit_dir.join("refs/stash");
+    let stash_path = vit_dir.join("logs/refs/stash");
 
-pub fn pop() {}
+    if !stash_path.exists() {
+        return;
+    }
+
+    let logs_data = fs::read_to_string(&stash_path).unwrap();
+    let mut lines: Vec<&str> = logs_data.lines().collect();
+
+    let current_stash = lines.pop().unwrap();
+    let parts: Vec<&str> = current_stash.splitn(8, ' ').collect();
+    let current_commit_hash = parts[1].to_string();
+    let current_commit_path = objects_path
+        .join(&current_commit_hash[..2])
+        .join(&current_commit_hash[2..]);
+
+    let stash_entry = read_commit_file(&current_commit_path).unwrap();
+    let stash_tree_hash = hex::encode(&stash_entry.tree);
+    let current_tree_hash = objects_path
+        .join(&stash_tree_hash[..2])
+        .join(&stash_tree_hash[2..]);
+
+    // Restore stashed files
+    let tree_entries = parse_tree_entries(&current_tree_hash).unwrap();
+    for entry in tree_entries {
+        let name = current_dir.join(&entry.name);
+        let hash_str = hex::encode(&entry.sha256);
+
+        let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+        let decompressed = decompress_file_content(&blob_path).unwrap();
+        let blob_data = &decompressed[decompressed.iter().position(|&b| b == 0).unwrap() + 1..];
+
+        // Make sure all parent directories are present
+        fs::create_dir_all(name.parent().unwrap()).unwrap();
+
+        // Write file data
+        fs::write(&name, blob_data).unwrap();
+        fs::remove_file(blob_path).unwrap();
+    }
+
+    // Remove tree entry
+    fs::remove_file(current_tree_hash).unwrap();
+
+    // Remove stash commit entry
+    fs::remove_file(current_commit_path).unwrap();
+
+    if lines.is_empty() {
+        // Remove stash head reference
+        if stash_ref.exists() {
+            fs::remove_file(&stash_ref).unwrap();
+        }
+
+        // Remove stash head reference
+        if stash_path.exists() {
+            fs::remove_file(&stash_path).unwrap();
+        }
+    } else {
+        // Update stash head reference
+        let next_stash = lines.pop().unwrap();
+        let next_parts: Vec<&str> = next_stash.splitn(8, ' ').collect();
+        let current_commit_hash = next_parts[1].to_string();
+
+        fs::write(&stash_ref, current_commit_hash).unwrap();
+        delete_last_line(&stash_path).unwrap();
+    }
+}
 
 pub fn list() {
     let current_dir = env::current_dir().unwrap();
@@ -205,4 +333,83 @@ pub fn list() {
     }
 }
 
-pub fn clear() {}
+pub fn clear() {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    let objects_path = vit_dir.join("objects");
+    let stash_ref = vit_dir.join("refs/stash");
+    let stash_path = vit_dir.join("logs/refs/stash");
+
+    if !stash_path.exists() {
+        return;
+    }
+
+    let logs_data = fs::read_to_string(&stash_path).unwrap();
+    let lines: Vec<&str> = logs_data.lines().collect();
+
+    for current_stash in lines {
+        let parts: Vec<&str> = current_stash.splitn(8, ' ').collect();
+        let current_commit_hash = parts[1].to_string();
+        let current_commit_path = objects_path
+            .join(&current_commit_hash[..2])
+            .join(&current_commit_hash[2..]);
+
+        let stash_entry = read_commit_file(&current_commit_path).unwrap();
+        let stash_tree_hash = hex::encode(&stash_entry.tree);
+        let current_tree_hash = objects_path
+            .join(&stash_tree_hash[..2])
+            .join(&stash_tree_hash[2..]);
+
+        // Restore stashed files
+        let tree_entries = parse_tree_entries(&current_tree_hash).unwrap();
+        for entry in tree_entries {
+            let hash_str = hex::encode(&entry.sha256);
+            let blob_path = objects_path.join(&hash_str[..2]).join(&hash_str[2..]);
+
+            if blob_path.exists() {
+                fs::remove_file(blob_path).unwrap();
+            }
+        }
+
+        // Remove tree entry
+        if current_tree_hash.exists() {
+            fs::remove_file(current_tree_hash).unwrap();
+        }
+
+        // Remove stash commit entry
+        if current_commit_path.exists() {
+            fs::remove_file(current_commit_path).unwrap();
+        }
+
+        // Remove stash head reference
+        if stash_ref.exists() {
+            fs::remove_file(&stash_ref).unwrap();
+        }
+
+        // Remove stash head reference
+        if stash_path.exists() {
+            fs::remove_file(&stash_path).unwrap();
+        }
+    }
+}
+
+fn delete_last_line(path: &Path) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+    let mut content = Vec::new();
+    file.read_to_end(&mut content)?;
+
+    // Find the position of the second-last newline
+    if let Some(pos) = content.iter().rposition(|&b| b == b'\n') {
+        let truncate_pos = if pos == 0 {
+            0 // file had only one line
+        } else {
+            content[..pos]
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(0, |p| p + 1)
+        };
+        file.set_len(truncate_pos as u64)?;
+    }
+
+    Ok(())
+}
