@@ -181,6 +181,28 @@ pub fn apply(_index: u8) {}
 
 pub fn pop() {}
 
-pub fn list() {}
+pub fn list() {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    let stash_path = vit_dir.join("logs/refs/stash");
+
+    if !stash_path.exists() {
+        return;
+    }
+
+    let logs_data = fs::read_to_string(stash_path).unwrap();
+    let lines: Vec<&str> = logs_data.lines().collect();
+
+    for (i, line) in lines.iter().rev().enumerate() {
+        let parts: Vec<&str> = line.splitn(8, ' ').collect();
+        if parts.len() < 8 {
+            continue;
+        }
+
+        let message = parts[7].trim();
+        let hash = parts[1].to_string();
+        println!("stash@{{{}}}: {}: {}", i, &hash[..8], message);
+    }
+}
 
 pub fn clear() {}
