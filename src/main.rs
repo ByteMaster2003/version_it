@@ -16,6 +16,9 @@ fn main() {
         Some(("status", _)) => {
             commands::status();
         }
+        Some(("log", _)) => {
+            commands::log();
+        }
         Some(("clone", _)) => {
             commands::clone();
         }
