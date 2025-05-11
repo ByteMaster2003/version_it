@@ -17,6 +17,12 @@ pub fn get_commit_command() -> Command {
 }
 
 pub fn commit(message: Option<String>) {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let commit_message = match message {
         Some(msg) => msg,
         None => utils::get_commit_message_from_editor("Updated:"),
@@ -26,7 +32,6 @@ pub fn commit(message: Option<String>) {
         return;
     }
 
-    let vit_dir = env::current_dir().unwrap().join(".vit");
     let mut index_entries = utils::read_index().unwrap();
     let head_ref = fs::read_to_string(vit_dir.join("HEAD")).unwrap();
     let current_branch_ref = head_ref.trim_start_matches("ref: ").trim();
@@ -50,7 +55,7 @@ pub fn commit(message: Option<String>) {
         author_name,
         author_email,
         &commit_message,
-        current_branch_ref
+        current_branch_ref,
     );
 
     index_entries.retain(|entry| entry.status != utils::FileStatus::Deleted);

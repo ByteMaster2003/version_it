@@ -13,10 +13,9 @@ pub fn get_status_command() -> Command {
 
 pub fn status() {
     let current_dir: PathBuf = env::current_dir().expect("Directory not found!");
-    let path_to_vit: PathBuf = current_dir.join(".vit");
-
-    if !path_to_vit.exists() {
-        return println!("Version_it repository not initialized!");
+    let vit_dir: PathBuf = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
     }
 
     let files_to_add: Vec<String> = utils::expand_paths(&[String::from(".")]);

@@ -9,7 +9,7 @@ pub fn init() -> io::Result<()> {
     let path_to_vit: PathBuf = env::current_dir()?.join(".vit");
 
     if path_to_vit.exists() {
-        println!("Vit repository already initialized!");
+        eprintln!("vit repository already initialized!");
         return Ok(());
     }
 

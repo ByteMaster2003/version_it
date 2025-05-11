@@ -40,11 +40,15 @@ pub fn get_stash_command() -> Command {
 }
 
 pub fn stash(message: Option<String>) {
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let mut index_entries: Vec<utils::IndexEntry> = utils::read_index().unwrap();
     let mut list_of_files: Vec<String> = Vec::new();
     let mut deleted_files: Vec<FileChange> = Vec::new();
-    let current_dir = env::current_dir().unwrap();
-    let vit_dir = current_dir.join(".vit");
     let objects_path = vit_dir.join("objects");
     let stash_ref = vit_dir.join("refs/stash");
 
@@ -190,6 +194,10 @@ pub fn stash(message: Option<String>) {
 pub fn apply(index: usize) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let objects_path = vit_dir.join("objects");
     let stash_path = vit_dir.join("logs/refs/stash");
 
@@ -201,10 +209,8 @@ pub fn apply(index: usize) {
     let lines: Vec<&str> = logs_data.lines().rev().collect();
 
     if index >= lines.len() {
-        println!("Invalid stash index!");
-        return;
+        return eprintln!("Invalid stash index!");
     }
-
 
     let stash_log = lines[index];
     let parts: Vec<&str> = stash_log.splitn(8, ' ').collect();
@@ -240,6 +246,10 @@ pub fn apply(index: usize) {
 pub fn pop() {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let objects_path = vit_dir.join("objects");
     let stash_ref = vit_dir.join("refs/stash");
     let stash_path = vit_dir.join("logs/refs/stash");
@@ -312,6 +322,10 @@ pub fn pop() {
 pub fn list() {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let stash_path = vit_dir.join("logs/refs/stash");
 
     if !stash_path.exists() {
@@ -336,6 +350,10 @@ pub fn list() {
 pub fn clear() {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
+    }
+
     let objects_path = vit_dir.join("objects");
     let stash_ref = vit_dir.join("refs/stash");
     let stash_path = vit_dir.join("logs/refs/stash");

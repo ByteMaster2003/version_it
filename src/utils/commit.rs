@@ -9,7 +9,7 @@ use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{Error, ErrorKind, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
 };
 
@@ -81,10 +81,10 @@ fn build_tree_recursive(path: &str, tree_map: &BTreeMap<String, Vec<&IndexEntry>
 }
 
 pub fn save_tree_object(content: &[u8]) -> Result<[u8; 32], Error> {
-    let path_to_vit: PathBuf = env::current_dir()?.join(".vit");
-
-    if !path_to_vit.exists() {
-        return Err(Error::new(ErrorKind::NotFound, "Vit directory not found!"));
+    let current_dir = env::current_dir().unwrap();
+    let vit_dir = current_dir.join(".vit");
+    if !vit_dir.exists() {
+        return Err(Error::new(ErrorKind::NotFound, "vit repository not initialized!"));
     }
 
     let mut full_data: Vec<u8> = Vec::new();
@@ -101,7 +101,7 @@ pub fn save_tree_object(content: &[u8]) -> Result<[u8; 32], Error> {
 
     // Save object to .vit/objects
     let tree_hash_str = hex::encode(tree_id);
-    let object_dir = path_to_vit.join(format!("objects/{}", &tree_hash_str[..2]));
+    let object_dir = vit_dir.join(format!("objects/{}", &tree_hash_str[..2]));
     let object_file = object_dir.join(&tree_hash_str[2..]);
 
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -186,9 +186,8 @@ fn save_commit_object(content: &[u8]) -> [u8; 32] {
 pub fn update_head(commit_hash: [u8; 32], commit_ref: &Path) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
-
     if !vit_dir.exists() {
-        panic!("Vit repository not initialized!");
+        panic!("vit repository not initialized!");
     }
 
     fs::write(commit_ref, hex::encode(commit_hash)).expect("Failed to update reference!");
@@ -204,9 +203,8 @@ pub fn write_log_entry(
 ) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
-
     if !vit_dir.exists() {
-        panic!("Version_it repository not initialized!");
+        return eprintln!("vit repository not initialized!");
     }
 
     let now = Local::now(); // Local time

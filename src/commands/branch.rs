@@ -23,7 +23,7 @@ pub fn get_branch_command() -> Command {
 pub fn branch(name: Option<String>, is_delete: bool) {
     let vit_dir = env::current_dir().unwrap().join(".vit");
     if !vit_dir.exists() {
-        return println!("Vit not initialized");
+        return eprintln!("vit not initialized");
     }
 
     let heads_dir = vit_dir.join("refs/heads");
@@ -38,7 +38,7 @@ pub fn branch(name: Option<String>, is_delete: bool) {
         let does_exists = new_branch_path.exists();
         if is_delete {
             if !does_exists {
-                return println!("{} {}", &branch_name.red(), "Branch does not exist!".red());
+                return eprintln!("{} {}", &branch_name.red(), "Branch does not exist!".red());
             }
             if Path::new(vit_dir.join(current_branch_ref).as_path())
                 .file_name()
@@ -47,14 +47,14 @@ pub fn branch(name: Option<String>, is_delete: bool) {
                 .to_string()
                 == branch_name
             {
-                return println!("{}", "Can not delete active branch".red());
+                return eprintln!("{}", "Can not delete active branch".red());
             }
 
             fs::remove_file(new_branch_path).unwrap();
             println!("Branch '{}' deleted", branch_name);
         } else {
             if does_exists {
-                return println!("{} {}", &branch_name.red(), "Branch already exists!".red());
+                return eprintln!("{} {}", &branch_name.red(), "Branch already exists!".red());
             }
 
             fs::write(new_branch_path, current_commit).unwrap();

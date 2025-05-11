@@ -14,10 +14,10 @@ pub fn log() {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
     let object_dir = vit_dir.join("objects");
-
     if !vit_dir.exists() {
         return eprintln!(".vit directory not found!");
     }
+
     let head_path = vit_dir.join("HEAD");
     let head_ref = fs::read_to_string(&head_path).unwrap();
     let current_branch_ref = head_ref.trim_start_matches("ref: ").trim();

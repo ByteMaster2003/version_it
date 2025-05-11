@@ -20,7 +20,7 @@ pub fn checkout(name: &str) {
     let current_dir = env::current_dir().unwrap();
     let vit_dir = current_dir.join(".vit");
     if !vit_dir.exists() {
-        return println!("Vit not initialized");
+        return eprintln!("vit repository not initialized!");
     }
 
     let heads_dir = vit_dir.join("refs/heads");
@@ -36,7 +36,7 @@ pub fn checkout(name: &str) {
         .to_string()
         == name
     {
-        return println!("{}", "Branch is already Active!".red());
+        return eprintln!("{}", "Branch is already Active!".red());
     }
 
     let current_commit_hash = fs::read_to_string(vit_dir.join(current_branch_ref)).unwrap();
@@ -53,7 +53,7 @@ pub fn checkout(name: &str) {
         fs::write(&head_path, format!("ref: refs/heads/{}", name)).unwrap();
         fs::read_to_string(heads_dir.join(name)).unwrap()
     } else {
-        return println!("Branch does not exist");
+        return eprintln!("Branch does not exist");
     };
 
     // Read commit object and get tree hash

@@ -20,11 +20,11 @@ pub fn get_add_command() -> Command {
 
 pub fn add(paths: &[String]) {
     let current_dir: PathBuf = env::current_dir().expect("Directory not found!");
-    let path_to_vit: PathBuf = current_dir.join(".vit");
+    let vit_dir: PathBuf = current_dir.join(".vit");
     let mut is_something_updated: bool = false;
 
-    if !path_to_vit.exists() {
-        return println!("Vit repository not initialized!");
+    if !vit_dir.exists() {
+        return eprintln!("vit repository not initialized!");
     }
 
     let files_to_add: Vec<String> = utils::expand_paths(paths);
@@ -63,7 +63,7 @@ pub fn add(paths: &[String]) {
                         existing_entry.sha256 = file_hash;
 
                         // Store file object
-                        let _ = utils::store_object(path_to_vit.as_path(), file_hash, object);
+                        let _ = utils::store_object(vit_dir.as_path(), file_hash, object);
                         is_something_updated = true;
                         println!("Added file: {}", file_path);
                     }
@@ -79,7 +79,7 @@ pub fn add(paths: &[String]) {
                 let (file_hash, object) = utils::hash_file(&file_path);
 
                 // Store file object
-                let _ = utils::store_object(path_to_vit.as_path(), file_hash, object);
+                let _ = utils::store_object(vit_dir.as_path(), file_hash, object);
                 is_something_updated = true;
             }
         }
@@ -98,5 +98,5 @@ pub fn add(paths: &[String]) {
         println!("Everything is up to date");
     }
 
-    utils::write_index(&index_entries, path_to_vit.join("index").to_str().unwrap()).unwrap();
+    utils::write_index(&index_entries, vit_dir.join("index").to_str().unwrap()).unwrap();
 }
