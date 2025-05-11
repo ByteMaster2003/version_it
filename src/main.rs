@@ -19,9 +19,6 @@ fn main() {
         Some(("log", _)) => {
             commands::log();
         }
-        Some(("clone", _)) => {
-            commands::clone();
-        }
         Some(("add", sub_matches)) => {
             let paths: Vec<String> = sub_matches
                 .get_many::<String>("paths")
